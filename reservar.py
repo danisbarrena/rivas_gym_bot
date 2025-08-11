@@ -44,7 +44,7 @@ def reservar_para(d: date) -> bool:
     log(f"Fecha: {d}  URL: {url}  Hora: {hora}")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
+        browser = p.chromium.launch(headless=True)
         ctx = browser.new_context()
         page = ctx.new_page()
 
