@@ -14,26 +14,25 @@ def log(msg: str):
 def _rellenar_login(page):
     """
     Intenta rellenar el formulario de login con selectores robustos.
+    Ajusta los selectores si el portal cambia textos/placeholders.
     """
-    # Campo usuario (texto o email)
+    # Usuario
     try:
-        # Si hay label accesible
-        page.get_by_label("Usuario", exact=False).fill(GYM_USER, timeout=2000)
+        page.get_by_label("Usuario", exact=False).fill(GYM_USER, timeout=3000)
     except Exception:
-        # Si no, coge el primer input de texto/email visible
-        page.locator("input[type='text'], input[type='email']").first.fill(GYM_USER, timeout=4000)
+        page.locator("input[type='text'], input[type='email']").first.fill(GYM_USER, timeout=5000)
 
-    # Campo contraseña
+    # Contraseña
     try:
-        page.get_by_label("Contraseña", exact=False).fill(GYM_PASS, timeout=2000)
+        page.get_by_label("Contraseña", exact=False).fill(GYM_PASS, timeout=3000)
     except Exception:
-        page.locator("input[type='password']").first.fill(GYM_PASS, timeout=4000)
+        page.locator("input[type='password']").first.fill(GYM_PASS, timeout=5000)
 
     # Botón acceder
     try:
-        page.get_by_role("button", name="Acceder").click(timeout=4000)
+        page.get_by_role("button", name="Acceder").click(timeout=5000)
     except Exception:
-        page.get_by_text("Acceder", exact=False).click(timeout=4000)
+        page.get_by_text("Acceder", exact=False).first.click(timeout=5000)
 
 def reservar_para(d: date) -> bool:
     url, hora = decidir_enlace_y_hora(d)
@@ -43,8 +42,12 @@ def reservar_para(d: date) -> bool:
 
     log(f"Fecha: {d}  URL: {url}  Hora: {hora}")
 
+    # Headless por defecto (necesario en GitHub Actions). Para ver el navegador en tu PC:
+    #   Windows (CMD/PowerShell): set HEADLESS=0 && python reservar.py
+    headless = os.getenv("HEADLESS", "1") != "0"
+
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=headless)
         ctx = browser.new_context()
         page = ctx.new_page()
 
@@ -52,7 +55,7 @@ def reservar_para(d: date) -> bool:
             # 1) Página de selección de hora
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
 
-            # 2) Click en la hora objetivo (celda/botón con texto exacto)
+            # 2) Click en la hora objetivo
             log("Buscando la hora en la tabla…")
             page.get_by_text(hora, exact=True).first.click(timeout=30000)
 
@@ -60,22 +63,21 @@ def reservar_para(d: date) -> bool:
             log("Clic en duración 90'…")
             page.get_by_text("90'", exact=True).first.click(timeout=30000)
 
-            # 4) Puede saltar login ahora
+            # 4) Login si aparece
             if LOGIN_URL in page.url:
                 if not (GYM_USER and GYM_PASS):
                     raise RuntimeError("Faltan credenciales GYM_USER/GYM_PASS")
                 log("Haciendo login…")
                 _rellenar_login(page)
 
-            # 5) Esperar pantalla de resumen y pulsar "Reservar"
+            # 5) Pantalla de resumen/bloqueo → botón "Reservar"
             log("Esperando botón 'Reservar'…")
             page.get_by_role("button", name="Reservar").first.click(timeout=60000)
 
-            # 6) Confirmación: esperamos estado estable y algún indicio
+            # 6) Confirmación
             log("Esperando confirmación…")
             page.wait_for_load_state("networkidle", timeout=60000)
 
-            # Señales típicas de reserva confirmada
             posibles = [
                 "text=Reserva confirmada",
                 "text=Reserva realizada",
@@ -92,8 +94,11 @@ def reservar_para(d: date) -> bool:
                     pass
 
             if not ok:
-                log("No encontré texto inequívoco de confirmación. Revisa la captura.")
-                page.screenshot(path="fallback_state.png")
+                log("No encontré texto inequívoco de confirmación. Revisa la captura (fallback_state.png).")
+                try:
+                    page.screenshot(path="fallback_state.png")
+                except Exception:
+                    pass
                 return False
 
             log("¡Reserva completada!")
@@ -111,7 +116,7 @@ def reservar_para(d: date) -> bool:
             browser.close()
 
 if __name__ == "__main__":
-    # Permite pasar fecha YYYY-MM-DD para pruebas
+    # Permite pasar fecha YYYY-MM-DD para pruebas; sin args → hoy
     d = date.today()
     if len(sys.argv) > 1:
         d = date.fromisoformat(sys.argv[1])
